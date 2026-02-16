@@ -1,0 +1,32 @@
+name: Deploy by SSH
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to Server
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script_stop: true
+          script: |
+            set -e
+            cd "${{ secrets.PROJECT_DIR }}"
+            git pull origin main
+            npm ci
+            npm run build
+            pm2 describe nanobanana >/dev/null 2>&1 && pm2 restart nanobanana || pm2 start "npm run start -- -p 6666 -H 127.0.0.1" --name nanobanana
+            pm2 save
