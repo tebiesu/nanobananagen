@@ -28,5 +28,5 @@ jobs:
             git pull origin main
             npm ci
             npm run build
-            pm2 describe nanobanana >/dev/null 2>&1 && pm2 restart nanobanana || pm2 start "npm run start -- -p 6666 -H 127.0.0.1" --name nanobanana
+            pm2 describe nanobanana >/dev/null 2>&1 && pm2 restart nanobanana || pm2 start "npm run start -- -p 16666 -H 127.0.0.1" --name nanobanana
             pm2 save

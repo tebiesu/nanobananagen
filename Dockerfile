@@ -12,7 +12,7 @@ RUN npm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-ENV PORT=6666
+ENV PORT=16666
 ENV HOSTNAME=0.0.0.0
 
 COPY package.json package-lock.json ./
@@ -22,5 +22,5 @@ COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/next.config.ts ./next.config.ts
 
-EXPOSE 6666
-CMD ["npm", "run", "start", "--", "-H", "0.0.0.0", "-p", "6666"]
+EXPOSE 16666
+CMD ["npm", "run", "start", "--", "-H", "0.0.0.0", "-p", "16666"]

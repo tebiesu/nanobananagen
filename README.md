@@ -35,9 +35,9 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
-## Docker Compose 一键部署（云服务器）
+## Docker Compose One-Command Deploy (Cloud Server)
 
-1. 安装 Docker 和 Compose 插件（Ubuntu 示例）
+1. Install Docker and Compose plugin (Ubuntu example)
 
 ```bash
 sudo apt update
@@ -45,37 +45,37 @@ sudo apt install -y docker.io docker-compose-plugin
 sudo systemctl enable --now docker
 ```
 
-2. 拉取项目并进入目录
+2. Clone project and enter directory
 
 ```bash
 git clone https://github.com/tebiesu/nanobananagen.git
 cd nanobananagen
 ```
 
-3. 复制环境变量文件（按需修改）
+3. Copy environment file (edit as needed)
 
 ```bash
 cp .env.production.example .env.production
 ```
 
-4. 一键构建并启动
+4. Build and start
 
 ```bash
 docker compose up -d --build
 ```
 
-5. 查看运行状态与日志
+5. Check status and logs
 
 ```bash
 docker compose ps
 docker compose logs -f --tail=100
 ```
 
-6. 更新代码并滚动重建
+6. Update code and redeploy
 
 ```bash
 git pull
 docker compose up -d --build
 ```
 
-Docker 部署后访问：`http://你的服务器IP:6666`
+Docker URL: `http://YOUR_SERVER_IP:16666`

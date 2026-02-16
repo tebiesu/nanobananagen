@@ -6,15 +6,15 @@ services:
     container_name: nanobanana
     restart: unless-stopped
     ports:
-      - "6666:6666"
+      - "16666:16666"
     env_file:
       - .env.production
     environment:
       NODE_ENV: production
-      PORT: 6666
+      PORT: 16666
       HOSTNAME: 0.0.0.0
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:6666').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:16666').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
