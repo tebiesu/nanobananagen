@@ -148,11 +148,14 @@ export default function Home() {
     if (typeof anyObj.content === 'string') {
       const content = anyObj.content;
 
-      const mdBase64Match = content.match(/!\[.*?\]\((data:image\/[\w+]+;base64,[^\s)]+)\)/);
-      if (mdBase64Match) return mdBase64Match[1];
-
       const mdUrlMatch = content.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/);
       if (mdUrlMatch) return mdUrlMatch[1];
+
+      const plainUrlMatch = content.match(/(https?:\/\/[^\s)]+)/);
+      if (plainUrlMatch) return plainUrlMatch[1];
+
+      const mdBase64Match = content.match(/!\[.*?\]\((data:image\/[\w+]+;base64,[^\s)]+)\)/);
+      if (mdBase64Match) return mdBase64Match[1];
 
       const dataUriMatch = content.match(/(data:image\/[\w+]+;base64,[A-Za-z0-9+/=]+)/);
       if (dataUriMatch) return dataUriMatch[1];
@@ -229,7 +232,13 @@ export default function Home() {
         throw new Error('\u8bf7\u9009\u62e9\u6216\u8f93\u5165\u6a21\u578b\u540d\u79f0\u3002');
       }
 
-      const enhancedPrompt = `${params.prompt}\n\n[Image specifications: aspect ratio ${params.aspectRatio}, resolution ${width}x${height}px]`;
+      const resolutionTag = getResolutionTag(params.resolution);
+      const enhancedPrompt = `${params.prompt}
+
+[画面要求]
+- ${resolutionTag}分辨率
+- 比例 ${params.aspectRatio}
+- 目标尺寸约 ${width}x${height}px`;
       let imageUrl: string | null = null;
 
       if (apiConfig.apiFormat === 'chat') {
@@ -296,7 +305,7 @@ ${params.negativePrompt ? `\n\n[Negative Prompt]\n${params.negativePrompt}` : ''
 
         const payload: Record<string, unknown> = {
           model: modelToUse,
-          prompt: params.prompt,
+          prompt: enhancedPrompt,
           n: 1,
           size: `${width}x${height}`,
           response_format: 'url',
@@ -475,4 +484,10 @@ function getResolutionFromAspectRatio(ratio: string, baseSize: number): [number,
   const totalPixels = baseSize * baseSize;
   const scale = Math.sqrt(totalPixels / (w * h));
   return [Math.round((w * scale) / 8) * 8, Math.round((h * scale) / 8) * 8];
+}
+
+function getResolutionTag(resolution: string): string {
+  if (resolution === '4096') return '4K';
+  if (resolution === '2048') return '2K';
+  return '1K';
 }

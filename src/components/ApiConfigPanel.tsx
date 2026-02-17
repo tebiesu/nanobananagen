@@ -47,9 +47,23 @@ export default function ApiConfigPanel({
   const [testResult, setTestResult] = useState<'success' | 'error' | null>(null);
   const [aiTestResult, setAiTestResult] = useState<'success' | 'error' | null>(null);
   const [activeTab, setActiveTab] = useState<'image' | 'ai'>('image');
+  const [useSameApi, setUseSameApi] = useState(false);
 
   useEffect(() => setLocalConfig(config), [config]);
   useEffect(() => setLocalAiConfig(aiConfig), [aiConfig]);
+  useEffect(() => {
+    const same = aiConfig.endpoint === config.endpoint && aiConfig.apiKey === config.apiKey && !!config.endpoint && !!config.apiKey;
+    setUseSameApi(same);
+  }, [aiConfig.endpoint, aiConfig.apiKey, config.endpoint, config.apiKey]);
+  useEffect(() => {
+    if (!useSameApi) return;
+    setLocalAiConfig((prev) => ({
+      ...prev,
+      endpoint: localConfig.endpoint,
+      apiKey: localConfig.apiKey,
+    }));
+    setAiTestResult(null);
+  }, [useSameApi, localConfig.endpoint, localConfig.apiKey]);
 
   const updateConfig = <K extends keyof ApiConfig>(key: K, value: ApiConfig[K]) => {
     setLocalConfig((prev) => ({ ...prev, [key]: value }));
@@ -82,7 +96,11 @@ export default function ApiConfigPanel({
 
       setTestResult('success');
       onChange(localConfig);
-      onAiConfigChange(localAiConfig);
+      onAiConfigChange(
+        useSameApi
+          ? { ...localAiConfig, endpoint: localConfig.endpoint, apiKey: localConfig.apiKey }
+          : localAiConfig,
+      );
     } catch {
       setTestResult('error');
     } finally {
@@ -267,17 +285,16 @@ export default function ApiConfigPanel({
                 id="sameApi"
                 type="checkbox"
                 className="h-4 w-4 accent-[var(--color-accent-highlight)]"
-                checked={
-                  localAiConfig.endpoint === localConfig.endpoint &&
-                  localAiConfig.apiKey === localConfig.apiKey
-                }
+                checked={useSameApi}
                 onChange={(e) => {
+                  setUseSameApi(e.target.checked);
                   if (e.target.checked) {
                     setLocalAiConfig({
                       endpoint: localConfig.endpoint,
                       apiKey: localConfig.apiKey,
                       model: localAiConfig.model,
                     });
+                    setAiTestResult(null);
                   }
                 }}
               />
@@ -294,6 +311,7 @@ export default function ApiConfigPanel({
                 placeholder="https://api.openai.com"
                 value={localAiConfig.endpoint}
                 onChange={(e) => updateAiConfig('endpoint', e.target.value)}
+                disabled={useSameApi}
               />
             </div>
 
@@ -306,6 +324,7 @@ export default function ApiConfigPanel({
                   placeholder="sk-..."
                   value={localAiConfig.apiKey}
                   onChange={(e) => updateAiConfig('apiKey', e.target.value)}
+                  disabled={useSameApi}
                 />
                 <button
                   type="button"
