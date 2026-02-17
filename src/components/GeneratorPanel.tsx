@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ApiConfig, CreativeMode, GenerationParams } from '@/app/page';
 import { Icons } from './Icons';
 
@@ -31,10 +31,16 @@ const ASPECT_RATIOS = [
   { value: '9:21', label: '9:21', desc: '长图' },
 ];
 
-const RESOLUTIONS = [
+const IMAGE_RESOLUTIONS = [
   { value: '1024', label: '1K', desc: '标准' },
   { value: '2048', label: '2K', desc: '高清' },
   { value: '4096', label: '4K', desc: '极清' },
+];
+
+const WEBUI_RESOLUTIONS = [
+  { value: '512', label: '512', desc: 'SD' },
+  { value: '768', label: '768', desc: 'SD+' },
+  { value: '1024', label: '1024', desc: 'HD' },
 ];
 
 const STEP_PRESETS = [
@@ -55,6 +61,7 @@ const MODE_OPTIONS: Array<{ value: CreativeMode; title: string; desc: string }> 
   { value: 'generate', title: '图片生成', desc: '仅用提示词生成新图' },
   { value: 'edit', title: '图片编辑', desc: '上传 1 张参考图后编辑' },
   { value: 'compose', title: '图片合成', desc: '上传 2-4 张图进行合成' },
+  { value: 'video', title: '视频生成', desc: '支持文生视频与图生视频' },
 ];
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -89,6 +96,31 @@ export default function GeneratorPanel({
     setLocalParams(params);
   }, [params]);
 
+  const availableModes = useMemo(() => {
+    return MODE_OPTIONS.filter((option) => {
+      if (apiConfig.apiFormat === 'webui') return option.value === 'generate';
+      if (apiConfig.apiFormat === 'grokVideo') return option.value === 'generate' || option.value === 'video';
+      return true;
+    });
+  }, [apiConfig.apiFormat]);
+
+  useEffect(() => {
+    if (!availableModes.some((it) => it.value === mode)) {
+      onModeChange('generate');
+      onReferenceImagesChange([]);
+    }
+  }, [availableModes, mode, onModeChange, onReferenceImagesChange]);
+
+  const resolutionOptions = apiConfig.apiFormat === 'webui' ? WEBUI_RESOLUTIONS : IMAGE_RESOLUTIONS;
+
+  useEffect(() => {
+    const valid = resolutionOptions.some((it) => it.value === localParams.resolution);
+    if (!valid) {
+      updateParam('resolution', apiConfig.apiFormat === 'webui' ? '1024' : '1024');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiConfig.apiFormat]);
+
   const updateParam = <K extends keyof GenerationParams>(key: K, value: GenerationParams[K]) => {
     const next = { ...localParams, [key]: value };
     setLocalParams(next);
@@ -111,43 +143,36 @@ export default function GeneratorPanel({
   const handlePickImages = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const dataUrls = await Promise.all(Array.from(files).map((file) => readFileAsDataUrl(file)));
-
-    if (mode === 'edit') {
+    if (mode === 'edit' || mode === 'video') {
       onReferenceImagesChange([dataUrls[0]]);
       return;
     }
-
-    const merged = [...referenceImages, ...dataUrls].slice(0, 4);
-    onReferenceImagesChange(merged);
-  };
-
-  const removeImageAt = (index: number) => {
-    onReferenceImagesChange(referenceImages.filter((_, i) => i !== index));
+    onReferenceImagesChange([...referenceImages, ...dataUrls].slice(0, 4));
   };
 
   const currentRatio = ASPECT_RATIOS.find((r) => r.value === localParams.aspectRatio)?.desc ?? '';
-  const currentResolution = RESOLUTIONS.find((r) => r.value === localParams.resolution)?.desc ?? '';
+  const currentResolution = resolutionOptions.find((r) => r.value === localParams.resolution)?.desc ?? '';
 
   const canGenerate =
     !!localParams.prompt.trim() &&
-    (mode === 'generate' || (mode === 'edit' && referenceImages.length >= 1) || (mode === 'compose' && referenceImages.length >= 2));
+    (mode === 'generate' || mode === 'video' || (mode === 'edit' && referenceImages.length >= 1) || (mode === 'compose' && referenceImages.length >= 2));
 
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-[720px] space-y-8 p-5 pb-8 lg:p-7">
         <section className="space-y-4 animate-fade-scale stagger-1">
           <div className="flex items-center gap-4">
-            <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[var(--color-banana-light)] to-[var(--color-banana-medium)] shadow-[var(--shadow-banana)] flex items-center justify-center">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--color-banana-light)] to-[var(--color-banana-medium)] shadow-[var(--shadow-banana)]">
               <div className="h-5 w-5 text-[var(--color-banana-dark)]">{Icons.wand}</div>
             </div>
             <div>
               <h2 className="font-display text-xl tracking-wide">创作模式</h2>
-              <p className="mt-1 text-xs text-[var(--color-text-muted)]">选择生成、编辑或合成工作流</p>
+              <p className="mt-1 text-xs text-[var(--color-text-muted)]">根据当前 API 自动过滤可用模式</p>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-            {MODE_OPTIONS.map((option) => (
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            {availableModes.map((option) => (
               <button
                 key={option.value}
                 type="button"
@@ -168,13 +193,13 @@ export default function GeneratorPanel({
         {mode !== 'generate' && (
           <section className="space-y-4 animate-fade-scale stagger-2">
             <div className="flex items-center gap-4">
-              <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[var(--color-coral-light)] to-[var(--color-coral)] shadow-lg flex items-center justify-center">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--color-coral-light)] to-[var(--color-coral)] shadow-lg">
                 <div className="h-5 w-5 text-white">{Icons.image}</div>
               </div>
               <div>
                 <h2 className="font-display text-xl tracking-wide">参考图片</h2>
                 <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                  {mode === 'edit' ? '编辑模式需上传 1 张图片' : '合成模式支持 2-4 张图片'}
+                  {mode === 'edit' ? '编辑模式需上传 1 张图片' : mode === 'compose' ? '合成模式支持 2-4 张图片' : '可选上传 1 张图片用于图生视频'}
                 </p>
               </div>
             </div>
@@ -197,7 +222,7 @@ export default function GeneratorPanel({
               className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-[rgba(42,36,32,0.2)] bg-white/55 px-4 py-6 text-sm text-[var(--color-text-secondary)] transition-all hover:bg-white/80"
             >
               <div className="h-4 w-4">{Icons.plus}</div>
-              <span>{mode === 'edit' ? '选择参考图' : '添加参考图（最多 4 张）'}</span>
+              <span>{mode === 'compose' ? '添加参考图（最多 4 张）' : '选择参考图（可选）'}</span>
             </button>
 
             {referenceImages.length > 0 && (
@@ -207,7 +232,7 @@ export default function GeneratorPanel({
                     <img src={url} alt={`参考图${index + 1}`} className="h-24 w-full object-cover" />
                     <button
                       type="button"
-                      onClick={() => removeImageAt(index)}
+                      onClick={() => onReferenceImagesChange(referenceImages.filter((_, i) => i !== index))}
                       className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100"
                       title="移除"
                     >
@@ -224,12 +249,12 @@ export default function GeneratorPanel({
 
         <section className="space-y-6 animate-fade-scale stagger-3">
           <div className="flex items-center gap-4">
-            <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[var(--color-banana-light)] to-[var(--color-banana-medium)] shadow-[var(--shadow-banana)] flex items-center justify-center">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--color-banana-light)] to-[var(--color-banana-medium)] shadow-[var(--shadow-banana)]">
               <div className="h-5 w-5 text-[var(--color-banana-dark)]">{Icons.pencil}</div>
             </div>
             <div>
               <h2 className="font-display text-xl tracking-wide">提示词</h2>
-              <p className="mt-1 text-xs text-[var(--color-text-muted)]">描述你想生成的图像内容</p>
+              <p className="mt-1 text-xs text-[var(--color-text-muted)]">描述你想生成的内容</p>
             </div>
           </div>
 
@@ -288,7 +313,7 @@ export default function GeneratorPanel({
 
         <section className="space-y-6 animate-fade-scale stagger-4">
           <div className="flex items-center gap-4">
-            <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[var(--color-coral-light)] to-[var(--color-coral)] shadow-lg flex items-center justify-center">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--color-coral-light)] to-[var(--color-coral)] shadow-lg">
               <div className="h-5 w-5 text-white">{Icons.aspectRatio}</div>
             </div>
             <div>
@@ -318,17 +343,19 @@ export default function GeneratorPanel({
 
         <section className="space-y-6 animate-fade-scale stagger-5">
           <div className="flex items-center gap-4">
-            <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[var(--color-accent-primary)] to-[var(--color-accent-secondary)] shadow-lg flex items-center justify-center">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--color-accent-primary)] to-[var(--color-accent-secondary)] shadow-lg">
               <div className="h-5 w-5 text-white">{Icons.resolution}</div>
             </div>
             <div>
               <h2 className="font-display text-xl tracking-wide">分辨率</h2>
-              <p className="mt-1 text-xs text-[var(--color-text-muted)]">分辨率越高，生成耗时越长</p>
+              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                {apiConfig.apiFormat === 'webui' ? 'WebUI 使用 SD 分辨率规格，不支持 4K' : '分辨率越高，生成耗时越长'}
+              </p>
             </div>
           </div>
 
           <div className="grid grid-cols-3 gap-3">
-            {RESOLUTIONS.map((res) => (
+            {resolutionOptions.map((res) => (
               <button
                 key={res.value}
                 type="button"
@@ -348,12 +375,12 @@ export default function GeneratorPanel({
 
         <section className="space-y-6 animate-fade-scale stagger-6">
           <div className="flex items-center gap-4">
-            <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[var(--color-banana-peel)] to-[var(--color-banana-dark)] shadow-lg flex items-center justify-center">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--color-banana-peel)] to-[var(--color-banana-dark)] shadow-lg">
               <div className="h-5 w-5 text-white">{Icons.robot}</div>
             </div>
             <div>
               <h2 className="font-display text-xl tracking-wide">模型</h2>
-              <p className="mt-1 text-xs text-[var(--color-text-muted)]">选择图像生成模型</p>
+              <p className="mt-1 text-xs text-[var(--color-text-muted)]">选择生成模型</p>
             </div>
           </div>
 
@@ -369,16 +396,13 @@ export default function GeneratorPanel({
                 ))}
               </select>
             ) : (
-              <>
-                <input
-                  type="text"
-                  className="input-brutal"
-                  placeholder={apiConfig.model || '例如：nano-banana-pro'}
-                  value={localParams.model}
-                  onChange={(e) => updateParam('model', e.target.value)}
-                />
-                <p className="mt-2 text-xs text-[var(--color-text-muted)]">配置 API 后可自动拉取可用模型。</p>
-              </>
+              <input
+                type="text"
+                className="input-brutal"
+                placeholder={apiConfig.model || '例如：nano-banana-pro'}
+                value={localParams.model}
+                onChange={(e) => updateParam('model', e.target.value)}
+              />
             )}
           </div>
         </section>
@@ -496,7 +520,7 @@ export default function GeneratorPanel({
             ) : (
               <>
                 <span className="text-xl">🍌</span>
-                <span>{mode === 'generate' ? '生成图像' : mode === 'edit' ? '编辑图像' : '合成图像'}</span>
+                <span>{mode === 'generate' ? '生成图像' : mode === 'edit' ? '编辑图像' : mode === 'compose' ? '合成图像' : '生成视频'}</span>
               </>
             )}
           </button>

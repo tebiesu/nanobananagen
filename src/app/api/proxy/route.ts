@@ -16,7 +16,12 @@ export async function POST(request: NextRequest) {
     const baseUrl = endpoint.replace(/\/+$/, '');
     
     // 根据类型选择 API 路径
-    const apiPath = type === 'chat' ? '/v1/chat/completions' : '/v1/images/generations';
+    const apiPath =
+      type === 'chat' || type === 'grokVideo'
+        ? '/v1/chat/completions'
+        : type === 'webui'
+          ? '/api/v1/generate_image'
+          : '/v1/images/generations';
     const targetUrl = `${baseUrl}${apiPath}`;
 
     console.log(`[Proxy] POST ${targetUrl}`);

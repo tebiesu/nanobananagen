@@ -10,8 +10,8 @@ import ThemeSettingsPanel from '@/components/ThemeSettingsPanel';
 import { useTheme } from '@/contexts/ThemeContext';
 import { saveImage } from '@/lib/imageStorage';
 
-export type ApiFormat = 'images' | 'chat';
-export type CreativeMode = 'generate' | 'edit' | 'compose';
+export type ApiFormat = 'images' | 'chat' | 'webui' | 'grokVideo';
+export type CreativeMode = 'generate' | 'edit' | 'compose' | 'video';
 
 export interface ApiConfig {
   endpoint: string;
@@ -19,6 +19,7 @@ export interface ApiConfig {
   model: string;
   apiFormat: ApiFormat;
 }
+type ApiConfigMap = Record<ApiFormat, Omit<ApiConfig, 'apiFormat'>>;
 
 export interface GenerationParams {
   prompt: string;
@@ -39,15 +40,20 @@ export interface GeneratedImage {
   params: GenerationParams;
   mode?: CreativeMode;
   sourceImageCount?: number;
+  mediaType?: 'image' | 'video';
 }
 
+const WEBUI_ENDPOINT = 'https://sd.exacg.cc';
+const DEFAULT_API_CONFIGS: ApiConfigMap = {
+  chat: { endpoint: '', apiKey: '', model: '' },
+  images: { endpoint: '', apiKey: '', model: '' },
+  webui: { endpoint: WEBUI_ENDPOINT, apiKey: '', model: '0' },
+  grokVideo: { endpoint: '', apiKey: '', model: 'grok-imagine-0.9' },
+};
+
 export default function Home() {
-  const [apiConfig, setApiConfig] = useState<ApiConfig>({
-    endpoint: '',
-    apiKey: '',
-    model: '',
-    apiFormat: 'chat',
-  });
+  const [activeApiFormat, setActiveApiFormat] = useState<ApiFormat>('chat');
+  const [apiConfigs, setApiConfigs] = useState<ApiConfigMap>(DEFAULT_API_CONFIGS);
 
   const [aiConfig, setAiConfig] = useState<AiAssistantConfig>({
     endpoint: '',
@@ -84,8 +90,33 @@ export default function Home() {
     try {
       const saved = localStorage.getItem('nanobanana-api-config');
       if (saved) {
-        const parsed = JSON.parse(saved) as ApiConfig;
-        setApiConfig({ ...parsed, apiFormat: parsed.apiFormat || 'chat' });
+        const parsed = JSON.parse(saved) as Partial<ApiConfig> & { apiConfigs?: Partial<ApiConfigMap>; activeApiFormat?: ApiFormat };
+        if (parsed.apiConfigs) {
+          const merged: ApiConfigMap = {
+            ...DEFAULT_API_CONFIGS,
+            ...parsed.apiConfigs,
+            webui: {
+              ...DEFAULT_API_CONFIGS.webui,
+              ...(parsed.apiConfigs.webui || {}),
+              endpoint: WEBUI_ENDPOINT,
+            },
+          };
+          setApiConfigs(merged);
+          setActiveApiFormat(parsed.activeApiFormat || parsed.apiFormat || 'chat');
+        } else {
+          // 向后兼容旧结构
+          const format = parsed.apiFormat || 'chat';
+          setApiConfigs((prev) => {
+            const next = { ...prev };
+            next[format] = {
+              endpoint: format === 'webui' ? WEBUI_ENDPOINT : (parsed.endpoint || ''),
+              apiKey: parsed.apiKey || '',
+              model: parsed.model || (format === 'webui' ? '0' : ''),
+            };
+            return next;
+          });
+          setActiveApiFormat(format);
+        }
       }
 
       const savedAi = localStorage.getItem('nanobanana-ai-config');
@@ -96,6 +127,22 @@ export default function Home() {
       // Ignore
     }
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('nanobanana-api-config', JSON.stringify({
+        activeApiFormat,
+        apiConfigs,
+      }));
+    } catch {
+      // Ignore
+    }
+  }, [activeApiFormat, apiConfigs]);
+
+  const apiConfig: ApiConfig = {
+    ...apiConfigs[activeApiFormat],
+    apiFormat: activeApiFormat,
+  };
 
   const fetchModels = useCallback(async (endpoint: string, apiKey: string): Promise<string[] | undefined> => {
     if (!endpoint || !apiKey) return undefined;
@@ -112,11 +159,11 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!apiConfig.endpoint || !apiConfig.apiKey) return;
+    if (!apiConfig.endpoint || !apiConfig.apiKey || apiConfig.apiFormat === 'webui') return;
     void fetchModels(apiConfig.endpoint, apiConfig.apiKey).then((models) => {
       if (models) setAvailableModels(models);
     });
-  }, [apiConfig.endpoint, apiConfig.apiKey, fetchModels]);
+  }, [apiConfig.endpoint, apiConfig.apiKey, apiConfig.apiFormat, fetchModels]);
 
   useEffect(() => {
     if (!aiConfig.endpoint || !aiConfig.apiKey) return;
@@ -125,54 +172,73 @@ export default function Home() {
     });
   }, [aiConfig.endpoint, aiConfig.apiKey, fetchModels]);
 
-  const findImageInResponse = (obj: unknown): string | null => {
+  const findMediaInResponse = (obj: unknown): { url: string; mediaType: 'image' | 'video' } | null => {
     if (!obj || typeof obj !== 'object') return null;
 
     const anyObj = obj as Record<string, unknown>;
+    const toMedia = (url: string): { url: string; mediaType: 'image' | 'video' } => {
+      const lower = url.toLowerCase();
+      if (lower.includes('.mp4') || lower.includes('.webm') || lower.includes('.mov') || lower.startsWith('data:video/')) {
+        return { url, mediaType: 'video' };
+      }
+      return { url, mediaType: 'image' };
+    };
 
     if (anyObj.image_url && typeof anyObj.image_url === 'object') {
       const imageUrl = (anyObj.image_url as Record<string, unknown>).url;
-      if (typeof imageUrl === 'string' && imageUrl) return imageUrl;
+      if (typeof imageUrl === 'string' && imageUrl) return toMedia(imageUrl);
+    }
+    if (typeof anyObj.image_url === 'string' && anyObj.image_url) {
+      return toMedia(anyObj.image_url);
+    }
+    if (typeof anyObj.video_url === 'string' && anyObj.video_url) {
+      return { url: anyObj.video_url, mediaType: 'video' };
     }
 
     if (typeof anyObj.url === 'string' && anyObj.url) {
       const url = anyObj.url;
-      if (url.startsWith('data:image/') || url.startsWith('http')) return url;
+      if (url.startsWith('data:image/') || url.startsWith('data:video/') || url.startsWith('http')) return toMedia(url);
     }
 
     if (Array.isArray(anyObj.images) && anyObj.images.length > 0) {
-      const found = findImageInResponse(anyObj.images[0]);
+      const found = findMediaInResponse(anyObj.images[0]);
       if (found) return found;
     }
 
     if (typeof anyObj.content === 'string') {
       const content = anyObj.content;
 
-      const mdUrlMatch = content.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/);
-      if (mdUrlMatch) return mdUrlMatch[1];
+      const mdVideoMatch = content.match(/!\[.*?\]\((https?:\/\/[^\s)]+\.(mp4|webm|mov)[^\s)]*)\)/i);
+      if (mdVideoMatch) return { url: mdVideoMatch[1], mediaType: 'video' };
 
-      const plainUrlMatch = content.match(/(https?:\/\/[^\s)]+)/);
-      if (plainUrlMatch) return plainUrlMatch[1];
+      const mdUrlMatch = content.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/);
+      if (mdUrlMatch) return toMedia(mdUrlMatch[1]);
+
+      const plainVideoMatch = content.match(/(https?:\/\/[^\s)"']+\.(mp4|webm|mov)[^\s)"']*)/i);
+      if (plainVideoMatch) return { url: plainVideoMatch[1], mediaType: 'video' };
+
+      const plainUrlMatch = content.match(/(https?:\/\/[^\s)"']+)/);
+      if (plainUrlMatch) return toMedia(plainUrlMatch[1]);
 
       const mdBase64Match = content.match(/!\[.*?\]\((data:image\/[\w+]+;base64,[^\s)]+)\)/);
-      if (mdBase64Match) return mdBase64Match[1];
+      if (mdBase64Match) return { url: mdBase64Match[1], mediaType: 'image' };
 
       const dataUriMatch = content.match(/(data:image\/[\w+]+;base64,[A-Za-z0-9+/=]+)/);
-      if (dataUriMatch) return dataUriMatch[1];
+      if (dataUriMatch) return { url: dataUriMatch[1], mediaType: 'image' };
     }
 
     if (Array.isArray(anyObj.data) && anyObj.data.length > 0) {
-      const found = findImageInResponse(anyObj.data[0]);
+      const found = findMediaInResponse(anyObj.data[0]);
       if (found) return found;
     }
 
     if (typeof anyObj.b64_json === 'string' && anyObj.b64_json) {
-      return `data:image/png;base64,${anyObj.b64_json}`;
+      return { url: `data:image/png;base64,${anyObj.b64_json}`, mediaType: 'image' };
     }
 
     for (const key of Object.keys(anyObj)) {
       if (['prompt', 'negative_prompt', 'text', 'role', 'type'].includes(key)) continue;
-      const found = findImageInResponse(anyObj[key]);
+      const found = findMediaInResponse(anyObj[key]);
       if (found) return found;
     }
 
@@ -199,7 +265,8 @@ export default function Home() {
   };
 
   const handleGenerate = useCallback(async () => {
-    if (!apiConfig.endpoint || !apiConfig.apiKey) {
+    const endpointToUse = apiConfig.apiFormat === 'webui' ? WEBUI_ENDPOINT : apiConfig.endpoint;
+    if (!apiConfig.apiKey || (apiConfig.apiFormat !== 'webui' && !apiConfig.endpoint)) {
       setError('\u8bf7\u5148\u914d\u7f6e API \u8bbe\u7f6e\u3002');
       setShowApiPanel(true);
       return;
@@ -219,29 +286,48 @@ export default function Home() {
       setError('\u5408\u6210\u6a21\u5f0f\u81f3\u5c11\u9700\u89812\u5f20\u53c2\u8003\u56fe\u7247\u3002');
       return;
     }
+    if (creativeMode === 'video' && referenceImages.length > 1) {
+      setReferenceImages((prev) => prev.slice(0, 1));
+    }
+    if (apiConfig.apiFormat === 'webui' && creativeMode !== 'generate') {
+      setError('WebUI API \u5f53\u524d\u53ea\u652f\u6301\u56fe\u7247\u751f\u6210\u6a21\u5f0f\u3002');
+      return;
+    }
+    if (apiConfig.apiFormat === 'grokVideo' && ['edit', 'compose'].includes(creativeMode)) {
+      setError('Grok 模块仅支持图片生成和视频生成。');
+      return;
+    }
+    if (creativeMode === 'video' && !['chat', 'grokVideo'].includes(apiConfig.apiFormat)) {
+      setError('视频生成请使用聊天补全或 Grok 视频 API。');
+      return;
+    }
 
     setIsGenerating(true);
     setError(null);
     startProgressSimulation();
 
     try {
-      const [width, height] = getResolutionFromAspectRatio(params.aspectRatio, parseInt(params.resolution, 10));
-      const modelToUse = params.model || apiConfig.model;
+      const baseSize = parseInt(params.resolution, 10);
+      const [width, height] = apiConfig.apiFormat === 'webui'
+        ? getWebUiResolutionFromAspectRatio(params.aspectRatio, baseSize)
+        : getResolutionFromAspectRatio(params.aspectRatio, baseSize);
+      const modelToUse = params.model || apiConfig.model || (apiConfig.apiFormat === 'webui' ? '0' : '');
 
       if (!modelToUse) {
         throw new Error('\u8bf7\u9009\u62e9\u6216\u8f93\u5165\u6a21\u578b\u540d\u79f0\u3002');
       }
 
-      const resolutionTag = getResolutionTag(params.resolution);
+      const resolutionTag = getResolutionTag(params.resolution, apiConfig.apiFormat);
       const enhancedPrompt = `${params.prompt}
 
 [画面要求]
-- ${resolutionTag}分辨率
+- ${apiConfig.apiFormat === 'webui' ? 'SD 分辨率' : `${resolutionTag}分辨率`}
 - 比例 ${params.aspectRatio}
 - 目标尺寸约 ${width}x${height}px`;
       let imageUrl: string | null = null;
+      let mediaType: 'image' | 'video' = creativeMode === 'video' ? 'video' : 'image';
 
-      if (apiConfig.apiFormat === 'chat') {
+      if (apiConfig.apiFormat === 'chat' || apiConfig.apiFormat === 'grokVideo') {
         const contentItems: Array<Record<string, unknown>> = [
           {
             type: 'text',
@@ -263,6 +349,11 @@ ${params.negativePrompt ? `\n\n[Negative Prompt]\n${params.negativePrompt}` : ''
               type: 'image_url',
               image_url: { url },
             });
+          });
+        } else if (creativeMode === 'video' && referenceImages.length > 0) {
+          contentItems.push({
+            type: 'image_url',
+            image_url: { url: referenceImages[0] },
           });
         }
 
@@ -287,18 +378,27 @@ ${params.negativePrompt ? `\n\n[Negative Prompt]\n${params.negativePrompt}` : ''
         const response = await fetch('/api/proxy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ endpoint: apiConfig.endpoint, apiKey: apiConfig.apiKey, type: 'chat', payload }),
+          body: JSON.stringify({
+            endpoint: endpointToUse,
+            apiKey: apiConfig.apiKey,
+            type: apiConfig.apiFormat === 'grokVideo' ? 'grokVideo' : 'chat',
+            payload: apiConfig.apiFormat === 'grokVideo'
+              ? { model: modelToUse, messages: [{ role: 'user', content: contentItems }] }
+              : payload,
+          }),
         });
 
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
 
-        imageUrl = findImageInResponse(data);
-        if (!imageUrl) {
+        const media = findMediaInResponse(data);
+        if (!media) {
           const textContent = data.choices?.[0]?.message?.content || '';
-          throw new Error(`No image returned by model. Partial response: ${String(textContent).slice(0, 120)}...`);
+          throw new Error(`No media returned by model. Partial response: ${String(textContent).slice(0, 120)}...`);
         }
-      } else {
+        imageUrl = media.url;
+        mediaType = media.mediaType;
+      } else if (apiConfig.apiFormat === 'images') {
         if (creativeMode !== 'generate') {
           throw new Error('\u7f16\u8f91/\u5408\u6210\u6a21\u5f0f\u9700\u5207\u6362\u4e3a\u300c\u804a\u5929\u8865\u5168 /v1/chat/completions\u300d\u63a5\u53e3\u3002');
         }
@@ -316,14 +416,42 @@ ${params.negativePrompt ? `\n\n[Negative Prompt]\n${params.negativePrompt}` : ''
         const response = await fetch('/api/proxy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ endpoint: apiConfig.endpoint, apiKey: apiConfig.apiKey, type: 'images', payload }),
+          body: JSON.stringify({ endpoint: endpointToUse, apiKey: apiConfig.apiKey, type: 'images', payload }),
         });
 
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
 
-        imageUrl = findImageInResponse(data);
+        const media = findMediaInResponse(data);
+        imageUrl = media?.url || null;
+        mediaType = media?.mediaType || 'image';
         if (!imageUrl) throw new Error('No image found in response data.');
+      } else {
+        const payload: Record<string, unknown> = {
+          prompt: enhancedPrompt,
+          negative_prompt: params.negativePrompt || '',
+          width,
+          height,
+          steps: params.steps,
+          cfg: params.guidance,
+          seed: params.seed ?? -1,
+          model_index: parseInt(modelToUse, 10) || 0,
+        };
+
+        const response = await fetch('/api/proxy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: endpointToUse, apiKey: apiConfig.apiKey, type: 'webui', payload }),
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        if (data?.success === false) throw new Error(data.error || data.message || 'WebUI API 返回错误');
+
+        const media = findMediaInResponse(data?.data ?? data);
+        imageUrl = media?.url || null;
+        mediaType = media?.mediaType || 'image';
+        if (!imageUrl) throw new Error('WebUI API 未返回可用图片地址。');
       }
 
       const timestamp = Date.now();
@@ -335,6 +463,7 @@ ${params.negativePrompt ? `\n\n[Negative Prompt]\n${params.negativePrompt}` : ''
         params: { ...params },
         mode: creativeMode,
         sourceImageCount: creativeMode === 'generate' ? 0 : (creativeMode === 'edit' ? 1 : Math.min(referenceImages.length, 4)),
+        mediaType,
       };
 
       try {
@@ -405,7 +534,11 @@ ${params.negativePrompt ? `\n\n[Negative Prompt]\n${params.negativePrompt}` : ''
           className="card-brutal animate-reveal-up flex min-h-[calc(100vh-2rem)] flex-col overflow-hidden border border-[rgba(47,42,38,0.12)] bg-white/45 dark:bg-[rgba(37,33,31,0.62)]"
           style={{ backdropFilter: settings.glassEffect ? 'blur(20px)' : 'none' }}
         >
-          <Header onApiClick={() => setShowApiPanel((v) => !v)} isApiConfigured={!!apiConfig.endpoint && !!apiConfig.apiKey} onThemeClick={() => setShowThemeSettings(true)} />
+          <Header
+            onApiClick={() => setShowApiPanel((v) => !v)}
+            isApiConfigured={apiConfig.apiFormat === 'webui' ? !!apiConfig.apiKey : (!!apiConfig.endpoint && !!apiConfig.apiKey)}
+            onThemeClick={() => setShowThemeSettings(true)}
+          />
 
           <main className="grid flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[minmax(350px,460px)_minmax(0,1fr)]">
             <aside
@@ -415,13 +548,19 @@ ${params.negativePrompt ? `\n\n[Negative Prompt]\n${params.negativePrompt}` : ''
               <div className={`overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] ${showApiPanel ? 'max-h-[1000px] opacity-100' : 'max-h-0 opacity-0'}`}>
                 <ApiConfigPanel
                   config={apiConfig}
+                  onFormatChange={(format) => setActiveApiFormat(format)}
                   onChange={(config) => {
-                    setApiConfig(config);
-                    try {
-                      localStorage.setItem('nanobanana-api-config', JSON.stringify(config));
-                    } catch {
-                      // Ignore
-                    }
+                    setActiveApiFormat(config.apiFormat);
+                    setApiConfigs((prev) => {
+                      return {
+                        ...prev,
+                        [config.apiFormat]: {
+                          endpoint: config.apiFormat === 'webui' ? WEBUI_ENDPOINT : config.endpoint,
+                          apiKey: config.apiKey,
+                          model: config.model,
+                        },
+                      };
+                    });
                   }}
                   availableModels={availableModels}
                   aiConfig={aiConfig}
@@ -486,7 +625,14 @@ function getResolutionFromAspectRatio(ratio: string, baseSize: number): [number,
   return [Math.round((w * scale) / 8) * 8, Math.round((h * scale) / 8) * 8];
 }
 
-function getResolutionTag(resolution: string): string {
+function getWebUiResolutionFromAspectRatio(ratio: string, baseSize: number): [number, number] {
+  const [w, h] = getResolutionFromAspectRatio(ratio, baseSize);
+  const normalize64 = (v: number) => Math.max(256, Math.round(v / 64) * 64);
+  return [normalize64(w), normalize64(h)];
+}
+
+function getResolutionTag(resolution: string, apiFormat: ApiFormat): string {
+  if (apiFormat === 'webui') return 'SD';
   if (resolution === '4096') return '4K';
   if (resolution === '2048') return '2K';
   return '1K';

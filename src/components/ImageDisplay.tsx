@@ -44,6 +44,7 @@ const MODE_TEXT: Record<string, string> = {
   generate: '\u56fe\u7247\u751f\u6210',
   edit: '\u56fe\u7247\u7f16\u8f91',
   compose: '\u56fe\u7247\u5408\u6210',
+  video: '\u89c6\u9891\u751f\u6210',
 };
 
 export default function ImageDisplay({ images, isGenerating, generationProgress = 0 }: ImageDisplayProps) {
@@ -105,6 +106,11 @@ export default function ImageDisplay({ images, isGenerating, generationProgress 
   };
 
   const visibleImages = showHistory ? storedImages : images;
+  const isVideoUrl = (url: string, mediaType?: string) => {
+    if (mediaType === 'video') return true;
+    const lower = url.toLowerCase();
+    return lower.includes('.mp4') || lower.includes('.webm') || lower.includes('.mov') || lower.startsWith('data:video/');
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -194,7 +200,11 @@ export default function ImageDisplay({ images, isGenerating, generationProgress 
                 return (
                   <div key={imageId} className="group relative cursor-pointer overflow-hidden rounded-2xl animate-fade-scale" style={{ animationDelay: `${index * 0.04}s` }} onClick={() => setSelectedImage(image)}>
                     <div className="aspect-square overflow-hidden rounded-2xl bg-[var(--color-bg-tertiary)] shadow-md transition-all duration-500 group-hover:shadow-xl">
-                      <img src={image.url} alt={image.prompt} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                      {isVideoUrl(image.url, 'mediaType' in image ? image.mediaType : undefined) ? (
+                        <video src={image.url} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" muted playsInline loop />
+                      ) : (
+                        <img src={image.url} alt={image.prompt} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                      )}
                     </div>
                     <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-t from-black/78 via-black/15 to-transparent opacity-0 transition-opacity duration-400 group-hover:opacity-100">
                       <div className="absolute bottom-0 left-0 right-0 p-4 text-white">
@@ -227,11 +237,20 @@ export default function ImageDisplay({ images, isGenerating, generationProgress 
                     className="relative flex max-w-full items-center justify-center rounded-3xl border border-white/50 bg-white/45 p-3 shadow-[0_28px_60px_rgba(42,36,32,0.16)] backdrop-blur-sm transition-transform duration-500 dark:border-white/10 dark:bg-black/15"
                     style={{ transform: `scale(${zoomLevel})` }}
                   >
-                    <img
-                      src={selectedImage.url}
-                      alt={selectedImage.prompt}
-                      className="max-h-[min(68vh,920px)] max-w-[min(100%,980px)] rounded-2xl object-contain"
-                    />
+                    {isVideoUrl(selectedImage.url, 'mediaType' in selectedImage ? selectedImage.mediaType : undefined) ? (
+                      <video
+                        src={selectedImage.url}
+                        className="max-h-[min(68vh,920px)] max-w-[min(100%,980px)] rounded-2xl object-contain"
+                        controls
+                        playsInline
+                      />
+                    ) : (
+                      <img
+                        src={selectedImage.url}
+                        alt={selectedImage.prompt}
+                        className="max-h-[min(68vh,920px)] max-w-[min(100%,980px)] rounded-2xl object-contain"
+                      />
+                    )}
                   </div>
                 </div>
               </div>
