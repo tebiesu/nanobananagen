@@ -31,11 +31,19 @@ const TXT = {
   ratio: '\u6bd4\u4f8b',
   resolution: '\u5206\u8fa8\u7387',
   steps: '\u6b65\u6570',
+  mode: '\u6a21\u5f0f',
+  sourceCount: '\u53c2\u8003\u56fe',
   zoom: '\u7f29\u653e',
   copyPrompt: '\u590d\u5236\u63d0\u793a\u8bcd',
   copied: '\u5df2\u590d\u5236',
   downloadImage: '\u4e0b\u8f7d\u56fe\u50cf',
   clearConfirm: '\u786e\u5b9a\u8981\u6e05\u7a7a\u5168\u90e8\u5386\u53f2\u8bb0\u5f55\uff1f\u8be5\u64cd\u4f5c\u4e0d\u53ef\u6062\u590d\u3002',
+};
+
+const MODE_TEXT: Record<string, string> = {
+  generate: '\u56fe\u7247\u751f\u6210',
+  edit: '\u56fe\u7247\u7f16\u8f91',
+  compose: '\u56fe\u7247\u5408\u6210',
 };
 
 export default function ImageDisplay({ images, isGenerating, generationProgress = 0 }: ImageDisplayProps) {
@@ -247,6 +255,18 @@ export default function ImageDisplay({ images, isGenerating, generationProgress 
                   )}
 
                   <div className="grid grid-cols-2 gap-2.5">
+                    {'mode' in selectedImage && selectedImage.mode && (
+                      <div className="rounded-xl border border-[rgba(42,36,32,0.12)] bg-white/75 p-3">
+                        <div className="text-xs text-[var(--color-text-muted)]">{TXT.mode}</div>
+                        <div className="mt-1 font-medium">{MODE_TEXT[selectedImage.mode] || selectedImage.mode}</div>
+                      </div>
+                    )}
+                    {'sourceImageCount' in selectedImage && typeof selectedImage.sourceImageCount === 'number' && selectedImage.sourceImageCount > 0 && (
+                      <div className="rounded-xl border border-[rgba(42,36,32,0.12)] bg-white/75 p-3">
+                        <div className="text-xs text-[var(--color-text-muted)]">{TXT.sourceCount}</div>
+                        <div className="mt-1 font-medium">{selectedImage.sourceImageCount}</div>
+                      </div>
+                    )}
                     <div className="rounded-xl border border-[rgba(42,36,32,0.12)] bg-white/75 p-3">
                       <div className="text-xs text-[var(--color-text-muted)]">{TXT.ratio}</div>
                       <div className="mt-1 font-medium">{selectedImage.params.aspectRatio}</div>

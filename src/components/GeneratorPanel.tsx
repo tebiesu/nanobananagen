@@ -1,12 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import type { GenerationParams, ApiConfig } from '@/app/page';
+import { useEffect, useRef, useState } from 'react';
+import type { ApiConfig, CreativeMode, GenerationParams } from '@/app/page';
 import { Icons } from './Icons';
 
 interface GeneratorPanelProps {
   params: GenerationParams;
   onChange: (params: GenerationParams) => void;
+  mode: CreativeMode;
+  onModeChange: (mode: CreativeMode) => void;
+  referenceImages: string[];
+  onReferenceImagesChange: (images: string[]) => void;
   onGenerate: () => void;
   isGenerating: boolean;
   error: string | null;
@@ -30,7 +34,7 @@ const ASPECT_RATIOS = [
 const RESOLUTIONS = [
   { value: '1024', label: '1K', desc: '标准' },
   { value: '2048', label: '2K', desc: '高清' },
-  { value: '4096', label: '4K', desc: '极致' },
+  { value: '4096', label: '4K', desc: '极清' },
 ];
 
 const STEP_PRESETS = [
@@ -47,9 +51,28 @@ const PRESET_PROMPTS = [
   '未来主义空间站，星云背景，细节丰富',
 ];
 
+const MODE_OPTIONS: Array<{ value: CreativeMode; title: string; desc: string }> = [
+  { value: 'generate', title: '图片生成', desc: '仅用提示词生成新图' },
+  { value: 'edit', title: '图片编辑', desc: '上传 1 张参考图后编辑' },
+  { value: 'compose', title: '图片合成', desc: '上传 2-4 张图进行合成' },
+];
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('读取图片失败'));
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function GeneratorPanel({
   params,
   onChange,
+  mode,
+  onModeChange,
+  referenceImages,
+  onReferenceImagesChange,
   onGenerate,
   isGenerating,
   error,
@@ -60,6 +83,7 @@ export default function GeneratorPanel({
   const [localParams, setLocalParams] = useState(params);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [includeSizeInPrompt, setIncludeSizeInPrompt] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setLocalParams(params);
@@ -79,13 +103,126 @@ export default function GeneratorPanel({
     updateParam('seed', null);
   };
 
+  const handleModeChange = (nextMode: CreativeMode) => {
+    onModeChange(nextMode);
+    onReferenceImagesChange([]);
+  };
+
+  const handlePickImages = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const dataUrls = await Promise.all(Array.from(files).map((file) => readFileAsDataUrl(file)));
+
+    if (mode === 'edit') {
+      onReferenceImagesChange([dataUrls[0]]);
+      return;
+    }
+
+    const merged = [...referenceImages, ...dataUrls].slice(0, 4);
+    onReferenceImagesChange(merged);
+  };
+
+  const removeImageAt = (index: number) => {
+    onReferenceImagesChange(referenceImages.filter((_, i) => i !== index));
+  };
+
   const currentRatio = ASPECT_RATIOS.find((r) => r.value === localParams.aspectRatio)?.desc ?? '';
   const currentResolution = RESOLUTIONS.find((r) => r.value === localParams.resolution)?.desc ?? '';
+
+  const canGenerate =
+    !!localParams.prompt.trim() &&
+    (mode === 'generate' || (mode === 'edit' && referenceImages.length >= 1) || (mode === 'compose' && referenceImages.length >= 2));
 
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-[720px] space-y-8 p-5 pb-8 lg:p-7">
-        <section className="space-y-6 animate-fade-scale stagger-1">
+        <section className="space-y-4 animate-fade-scale stagger-1">
+          <div className="flex items-center gap-4">
+            <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[var(--color-banana-light)] to-[var(--color-banana-medium)] shadow-[var(--shadow-banana)] flex items-center justify-center">
+              <div className="h-5 w-5 text-[var(--color-banana-dark)]">{Icons.wand}</div>
+            </div>
+            <div>
+              <h2 className="font-display text-xl tracking-wide">创作模式</h2>
+              <p className="mt-1 text-xs text-[var(--color-text-muted)]">选择生成、编辑或合成工作流</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+            {MODE_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => handleModeChange(option.value)}
+                className={`rounded-2xl border p-3 text-left transition-all duration-300 ${
+                  mode === option.value
+                    ? 'border-transparent bg-gradient-to-br from-[var(--color-accent-highlight)] to-[#ff8a5c] text-white shadow-md'
+                    : 'border-[rgba(42,36,32,0.1)] bg-white/70 hover:border-[rgba(42,36,32,0.2)]'
+                }`}
+              >
+                <div className="text-sm font-semibold">{option.title}</div>
+                <div className={`mt-1 text-xs ${mode === option.value ? 'text-white/85' : 'text-[var(--color-text-muted)]'}`}>{option.desc}</div>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {mode !== 'generate' && (
+          <section className="space-y-4 animate-fade-scale stagger-2">
+            <div className="flex items-center gap-4">
+              <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[var(--color-coral-light)] to-[var(--color-coral)] shadow-lg flex items-center justify-center">
+                <div className="h-5 w-5 text-white">{Icons.image}</div>
+              </div>
+              <div>
+                <h2 className="font-display text-xl tracking-wide">参考图片</h2>
+                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                  {mode === 'edit' ? '编辑模式需上传 1 张图片' : '合成模式支持 2-4 张图片'}
+                </p>
+              </div>
+            </div>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple={mode === 'compose'}
+              className="hidden"
+              onChange={(e) => {
+                void handlePickImages(e.target.files);
+                e.target.value = '';
+              }}
+            />
+
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-[rgba(42,36,32,0.2)] bg-white/55 px-4 py-6 text-sm text-[var(--color-text-secondary)] transition-all hover:bg-white/80"
+            >
+              <div className="h-4 w-4">{Icons.plus}</div>
+              <span>{mode === 'edit' ? '选择参考图' : '添加参考图（最多 4 张）'}</span>
+            </button>
+
+            {referenceImages.length > 0 && (
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                {referenceImages.map((url, index) => (
+                  <div key={`${url.slice(0, 18)}-${index}`} className="group relative overflow-hidden rounded-xl border border-[rgba(42,36,32,0.1)] bg-white/70">
+                    <img src={url} alt={`参考图${index + 1}`} className="h-24 w-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removeImageAt(index)}
+                      className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                      title="移除"
+                    >
+                      <div className="h-3.5 w-3.5">{Icons.close}</div>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        <div className="h-px bg-gradient-to-r from-transparent via-[rgba(42,36,32,0.12)] to-transparent" />
+
+        <section className="space-y-6 animate-fade-scale stagger-3">
           <div className="flex items-center gap-4">
             <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[var(--color-banana-light)] to-[var(--color-banana-medium)] shadow-[var(--shadow-banana)] flex items-center justify-center">
               <div className="h-5 w-5 text-[var(--color-banana-dark)]">{Icons.pencil}</div>
@@ -149,9 +286,7 @@ export default function GeneratorPanel({
           </div>
         </section>
 
-        <div className="h-px bg-gradient-to-r from-transparent via-[rgba(42,36,32,0.12)] to-transparent" />
-
-        <section className="space-y-6 animate-fade-scale stagger-2">
+        <section className="space-y-6 animate-fade-scale stagger-4">
           <div className="flex items-center gap-4">
             <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[var(--color-coral-light)] to-[var(--color-coral)] shadow-lg flex items-center justify-center">
               <div className="h-5 w-5 text-white">{Icons.aspectRatio}</div>
@@ -181,7 +316,7 @@ export default function GeneratorPanel({
           </div>
         </section>
 
-        <section className="space-y-6 animate-fade-scale stagger-3">
+        <section className="space-y-6 animate-fade-scale stagger-5">
           <div className="flex items-center gap-4">
             <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[var(--color-accent-primary)] to-[var(--color-accent-secondary)] shadow-lg flex items-center justify-center">
               <div className="h-5 w-5 text-white">{Icons.resolution}</div>
@@ -211,7 +346,7 @@ export default function GeneratorPanel({
           </div>
         </section>
 
-        <section className="space-y-6 animate-fade-scale stagger-4">
+        <section className="space-y-6 animate-fade-scale stagger-6">
           <div className="flex items-center gap-4">
             <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[var(--color-banana-peel)] to-[var(--color-banana-dark)] shadow-lg flex items-center justify-center">
               <div className="h-5 w-5 text-white">{Icons.robot}</div>
@@ -348,20 +483,20 @@ export default function GeneratorPanel({
           <button
             type="button"
             onClick={onGenerate}
-            disabled={isGenerating || !localParams.prompt.trim()}
-            className={`btn-brutal btn-brutal--primary flex w-full items-center justify-center gap-3 py-4 text-base animate-fade-scale stagger-5 ${
+            disabled={isGenerating || !canGenerate}
+            className={`btn-brutal btn-brutal--primary flex w-full items-center justify-center gap-3 py-4 text-base animate-fade-scale stagger-7 ${
               isGenerating ? 'animate-pulse cursor-wait' : ''
-            } ${!localParams.prompt.trim() ? 'cursor-not-allowed opacity-50' : ''}`}
+            } ${!canGenerate ? 'cursor-not-allowed opacity-50' : ''}`}
           >
             {isGenerating ? (
               <>
                 <div className="h-5 w-5 animate-spin">{Icons.hourglass}</div>
-                <span>生成中...</span>
+                <span>处理中...</span>
               </>
             ) : (
               <>
                 <span className="text-xl">🍌</span>
-                <span>生成图像</span>
+                <span>{mode === 'generate' ? '生成图像' : mode === 'edit' ? '编辑图像' : '合成图像'}</span>
               </>
             )}
           </button>
